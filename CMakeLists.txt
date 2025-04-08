@@ -4,7 +4,7 @@ project(mujoco_sim_ros2)
 set(CMAKE_POLICY_DEFAULT_CMP0072 NEW)
 
 if (CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
+    add_compile_options(-Wall -Wextra -Wpedantic)
 endif ()
 
 # download dependencies
@@ -39,10 +39,10 @@ endif ()
 # find dependencies
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(ament_cmake REQUIRED)
-find_package(mujoco REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(Threads REQUIRED)
 
+find_package(mujoco_ament REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(controller_manager REQUIRED)
@@ -59,8 +59,8 @@ add_executable(mujoco_sim
     src/platform_ui_adapter.cc
     src/simulate.cc
     src/main.cc)
-target_link_libraries(mujoco_sim PUBLIC mujoco::mujoco glfw lodepng Threads::Threads)
-ament_target_dependencies(mujoco_sim PUBLIC rclcpp pluginlib controller_manager)
+target_link_libraries(mujoco_sim PUBLIC glfw lodepng Threads::Threads)
+ament_target_dependencies(mujoco_sim PUBLIC rclcpp mujoco_ament pluginlib controller_manager)
 target_include_directories(mujoco_sim PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>" PRIVATE src)
@@ -90,6 +90,6 @@ install(TARGETS mujoco_sim
     DESTINATION lib/${PROJECT_NAME})
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(rclcpp pluginlib mujoco)
+ament_export_dependencies(rclcpp pluginlib mujoco_ament)
 
 ament_package()

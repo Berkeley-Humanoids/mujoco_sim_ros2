@@ -9,7 +9,7 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <depend>mujoco</depend>
+  <depend>mujoco_ament</depend>
   <depend>glfw3</depend>
 
   <depend>rclcpp</depend>
