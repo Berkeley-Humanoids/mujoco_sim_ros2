@@ -11,6 +11,7 @@
 
   <depend>mujoco_ament</depend>
   <depend>libglfw3-dev</depend>
+  <depend>git</depend>
 
   <depend>rclcpp</depend>
   <depend>pluginlib</depend>
