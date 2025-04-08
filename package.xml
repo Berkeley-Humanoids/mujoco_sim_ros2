@@ -10,7 +10,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>mujoco_ament</depend>
-  <depend>glfw3</depend>
+  <depend>libglfw3-dev</depend>
 
   <depend>rclcpp</depend>
   <depend>pluginlib</depend>
