@@ -9,6 +9,7 @@ endif ()
 
 # download dependencies
 include(FetchContent)
+set(FETCHCONTENT_FULLY_DISCONNECTED OFF) # In Ubuntu 24.04, the debhelper tool sets this variable to ON by default
 
 set(MUJOCO_DEP_VERSION_lodepng
     b4ed2cd7ecf61d29076169b49199371456d4f90b
