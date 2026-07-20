@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -67,6 +69,22 @@ using Seconds = std::chrono::duration<double>;
 
 std::unique_ptr<pluginlib::ClassLoader<mujoco_sim_ros2::MujocoPhysicsPlugin>> physics_plugin_loader;
 std::vector<std::shared_ptr<mujoco_sim_ros2::MujocoPhysicsPlugin>> physics_plugins;
+
+// Set once the Simulate UI exists; the SIGINT handler reads it to request a
+// clean exit. Atomic so the async-signal handler can touch it safely.
+std::atomic<mj::Simulate*> g_sim{nullptr};
+
+// Async-signal-safe SIGINT handler: ONLY ask the render + physics loops to stop
+// (both poll sim.exitrequest). The real teardown -- deleting the mjModel/mjData,
+// dropping plugins, rclcpp::shutdown -- runs in main() after the worker threads
+// join, so nothing is freed while another thread is still using it. The former
+// handler deleted m/d and cleared the plugins from inside the signal handler
+// while PhysicsThread was mid-mj_step: a use-after-free that SIGSEGV'd on exit.
+void HandleSigint(int /*signum*/) {
+  if (mj::Simulate* s = g_sim.load()) {
+    s->exitrequest.store(1);
+  }
+}
 
 //---------------------------------------- plugin handling -----------------------------------------
 
@@ -506,9 +524,10 @@ void PhysicsThread(mj::Simulate* sim, rclcpp::Node::SharedPtr node,
 
   PhysicsLoop(*sim, physics_plugins);
 
-  // delete everything we allocated
-  mj_deleteData(d);
-  mj_deleteModel(m);
+  // NOTE: the mjModel/mjData are NOT freed here. The physics plugins (the
+  // controller_manager + MujocoSystem hardware) still reference m/d, so freeing
+  // them on this thread would leave the plugin teardown reading freed memory.
+  // main() frees them last, after the plugins are dropped.
 }
 
 //------------------------------------------ main --------------------------------------------------
@@ -539,17 +558,13 @@ int main(int argc, char** argv) {
     mju_error("Headers and library have different versions");
   }
 
-  // install signal handler
-  std::signal(SIGINT, [](int) {;
-    if (m) mj_deleteModel(m);
-    if (d) mj_deleteData(d);
-    physics_plugins.clear();
-    rclcpp::shutdown();
-    std::exit(0);
-  });
-
   //--------------------- set up ros node ---------------------//
-  rclcpp::init(argc, argv);
+  // Disable rclcpp's own signal handling: we install our own SIGINT handler
+  // (below, once the Simulate UI exists) that requests a clean exit via
+  // sim.exitrequest and lets main() tear everything down after the threads join.
+  rclcpp::InitOptions init_options;
+  init_options.shutdown_on_signal = false;
+  rclcpp::init(argc, argv, init_options);
   std::shared_ptr<rclcpp::Node> node = rclcpp::Node::make_shared(
       "mujoco_sim_ros2_node");
 
@@ -620,6 +635,12 @@ int main(int argc, char** argv) {
       &cam, &opt, &pert, /* is_passive = */ false
   );
 
+  // Now that the UI exists, install the SIGINT handler. Ctrl-C (or ros2 launch's
+  // SIGINT) sets sim.exitrequest, which breaks both RenderLoop and PhysicsLoop;
+  // the actual teardown happens below after the threads join.
+  g_sim.store(sim.get());
+  std::signal(SIGINT, HandleSigint);
+
   // start physics thread
   std::thread physicsthreadhandle(&PhysicsThread, sim.get(),
   node, cm_node_options, model_file.c_str(), physics_plugins);
@@ -628,5 +649,31 @@ int main(int argc, char** argv) {
   sim->RenderLoop();
   physicsthreadhandle.join();
 
-  return 0;
+  // Orderly teardown on the main thread, after both worker threads have joined.
+  // Ordering matters:
+  //   1) rclcpp::shutdown() first -- the controller_manager's executor spin
+  //      thread exits (rclcpp::ok() -> false) and shutdown-time controller
+  //      deactivation / hardware shutdown runs while the CM + executor are still
+  //      alive (avoids the "Node needs to be associated with an executor" throw);
+  //   2) drop the plugins (CM + MujocoSystem hardware) while the mjModel/mjData
+  //      they reference are still valid;
+  //   3) only then free the mjModel/mjData -- nothing references them anymore.
+  if (rclcpp::ok()) {
+    rclcpp::shutdown();
+  }
+  // Functional teardown: destroy the plugins so the controller_manager
+  // deactivates the controllers and shuts down the hardware (matters on real
+  // hardware -- puts the actuators in a safe state) while the mjModel/mjData are
+  // still valid.
+  physics_plugins.clear();
+
+  // Exit immediately instead of running the remaining cross-library static /
+  // plugin-library destruction. controller_manager + pluginlib unload their
+  // controller/hardware libraries in an order that corrupts the heap on process
+  // exit ("corrupted size vs. prev_size" / class_loader unload-with-live-objects
+  // warnings); that teardown is upstream and fragile. All functional cleanup is
+  // already done above, and the OS reclaims the rest, so a hard _exit(0) is the
+  // clean, deterministic way out.
+  std::fflush(nullptr);
+  _exit(0);
 }
