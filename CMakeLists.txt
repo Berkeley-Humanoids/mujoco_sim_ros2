@@ -4,11 +4,12 @@ project(mujoco_sim_ros2)
 set(CMAKE_POLICY_DEFAULT_CMP0072 NEW)
 
 if (CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
+    add_compile_options(-Wall -Wextra -Wpedantic)
 endif ()
 
 # download dependencies
 include(FetchContent)
+set(FETCHCONTENT_FULLY_DISCONNECTED OFF) # In Ubuntu 24.04, the debhelper tool sets this variable to ON by default
 
 set(MUJOCO_DEP_VERSION_lodepng
     b4ed2cd7ecf61d29076169b49199371456d4f90b
@@ -39,21 +40,14 @@ endif ()
 # find dependencies
 set(OpenGL_GL_PREFERENCE GLVND)
 find_package(ament_cmake REQUIRED)
-find_package(mujoco REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(Threads REQUIRED)
 
+find_package(mujoco_ament REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(controller_manager REQUIRED)
 find_package(ament_index_cpp REQUIRED)
-# tinyxml2 (the same one ros2_control's hardware_interface links). Discover it
-# through the ROS tinyxml2_vendor package so it works across distros: Ubuntu
-# 24.04 ships tinyxml2's CMake config, but 22.04 (Humble) does not. tinyxml2_vendor
-# prepends a FindTinyXML2 module and ensures the tinyxml2::tinyxml2 imported
-# target (used on the mujoco_sim link step below) exists on both.
-find_package(tinyxml2_vendor REQUIRED)
-find_package(TinyXML2 REQUIRED)
 
 add_library(${PROJECT_NAME} INTERFACE)
 target_include_directories(${PROJECT_NAME} INTERFACE
@@ -66,19 +60,8 @@ add_executable(mujoco_sim
     src/platform_ui_adapter.cc
     src/simulate.cc
     src/main.cc)
-target_link_libraries(mujoco_sim PUBLIC mujoco::mujoco glfw lodepng Threads::Threads)
-# tinyxml2 ODR fix: libmujoco statically bundles tinyxml2 and exports its symbols, while
-# ros2_control's libhardware_interface uses the system libtinyxml2. Loading a ros2_control
-# plugin then makes hardware_interface's tinyxml2 objects bind to libmujoco's copy (different
-# ABI), corrupting the heap (crash: "free(): invalid pointer" in XMLDocument's dtor). Force
-# the system libtinyxml2 to be an early DT_NEEDED of mujoco_sim so it wins symbol resolution
-# in the global scope and every tinyxml2 reference resolves to a single shared copy.
-# --no-as-needed is required because mujoco_sim has no direct tinyxml2 references and the
-# entry would otherwise be stripped; the flag + library path are passed as one -Wl token so
-# the toolchain cannot reorder them.
-target_link_options(mujoco_sim PRIVATE
-    "-Wl,--no-as-needed,$<TARGET_FILE:tinyxml2::tinyxml2>,--as-needed")
-ament_target_dependencies(mujoco_sim PUBLIC rclcpp pluginlib controller_manager)
+target_link_libraries(mujoco_sim PUBLIC glfw lodepng Threads::Threads)
+ament_target_dependencies(mujoco_sim PUBLIC rclcpp mujoco_ament pluginlib controller_manager)
 target_include_directories(mujoco_sim PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>" PRIVATE src)
@@ -108,6 +91,6 @@ install(TARGETS mujoco_sim
     DESTINATION lib/${PROJECT_NAME})
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(rclcpp pluginlib mujoco)
+ament_export_dependencies(rclcpp pluginlib mujoco_ament)
 
 ament_package()
