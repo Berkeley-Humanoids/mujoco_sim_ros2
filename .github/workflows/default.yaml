@@ -27,8 +27,13 @@ jobs:
         run: |
           cd ${GITHUB_WORKSPACE}/colcon_ws
           git clone -b 3.2.7 https://github.com/google-deepmind/mujoco.git
-          git clone https://github.com/rxdu/mujoco_ros2_control.git
-          git clone https://github.com/rxdu/mujoco_demo_robot.git
+          # This fork tracks qiayuanl's devel, which added a mujoco_ament
+          # dependency (find_package in CMakeLists) that the original rxdu CI
+          # recipe never cloned -> the build failed at find_package(mujoco_ament).
+          git clone https://github.com/qiayuanl/mujoco_ament.git
+          # The rxdu mujoco_ros2_control / mujoco_demo_robot demos are a
+          # different lineage (grand-source) and are NOT needed to build+check
+          # this library; drop them so CI tests mujoco_sim_ros2 itself.
       - name: Install dependencies
         run: |
           sudo apt-get update
